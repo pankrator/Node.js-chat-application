@@ -41,6 +41,9 @@ async function run() {
   input.prompt();
   input.on('line', line => {
     let parsed = commander(line);
+    if (!parsed) {
+      return;
+    }
     if (parsed.isFile) {
       client.sendFile(parsed.filePath, parsed.fileName);
     } else {

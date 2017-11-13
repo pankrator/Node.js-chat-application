@@ -62,29 +62,82 @@ describe('Test connectivity', function () {
       client.onMessage((data) => {
         expect(data._sender).to.equal('user2');
         expect(data._text).to.equal('Hello from client1');
+        client2.close();
         resolve();
       });
     });
   });
 
+  it('should be able to send segmented text message', async function() {
+    let client2 = new Client(createFakeInput('user2'));
+    await client2.start({ port: 8000 });
+
+    let text = new Array(10500).join('*');
+    client.sendMessage(text);
+
+    return new Promise(resolve => {
+      client2.onMessage((data) => {
+        expect(data._sender).to.equal('test-user');
+        expect(data._text).to.equal(text);
+        client2.close();
+        resolve();
+      });
+    });
+  });
+
+  // it('should be able to send message while receiving big one', async function() {
+  //   this.timeout(5000);
+  //   let client2 = new Client(createFakeInput('user2'));
+  //   await client2.start({ port: 8000 });
+
+  //   let text = new Array(10500).join('*');
+  //   client.sendMessage(text);
+
+  //   return new Promise(resolve => {
+  //     client2.onMessage((data) => {
+  //       expect(data._sender).to.equal('test-user');
+  //       expect(data._text).to.equal(text);
+  //       client2.close();
+  //       resolve();
+  //     });
+  //   });
+  // });
+
   it('second client should receive a file from first client', async () => {
     let client2 = new Client(createFakeInput('user2'));
     await client2.start({ port: 8000 });
 
-    let expectedFileBuffer = fs.readFileSync('D:/Developer/net_test/bigFile.txt');
-    client.sendFile('D:/Developer/net_test/bigFile.txt', 'poluchi.txt');
+    let expectedFileBuffer = fs.readFileSync(__dirname + '/resources/small.txt');
+    client.sendFile(__dirname + '/resources/small.txt', 'poluchi.txt');
 
     return new Promise(resolve => {
       client2.onMessage((data) => {
         expect(data._sender).to.equal('test-user');
         expect(data._isPlain).to.equal(0);
         expect(data._isFile).to.equal(2);
-        expect(data._fileBuffer.length).to.be.gt(45000);
         expect(data._fileBuffer.equals(expectedFileBuffer)).to.be.true;
+        client2.close();
         resolve();
       });
     });
   });
 
+  it('should send file bigger than 4MB', async function() {
+    let client2 = new Client(createFakeInput('user2'));
+    await client2.start({ port: 8000 });
 
+    let expectedFileBuffer = fs.readFileSync(__dirname + '/resources/big.txt');
+    client.sendFile(__dirname + '/resources/big.txt', 'poluchi.txt');
+
+    return new Promise(resolve => {
+      client2.onMessage((data) => {
+        expect(data._sender).to.equal('test-user');
+        expect(data._isPlain).to.equal(0);
+        expect(data._isFile).to.equal(2);
+        expect(data._fileBuffer.equals(expectedFileBuffer)).to.be.true;
+        client2.close();
+        resolve();
+      });
+    });
+  });
 });
