@@ -23,6 +23,7 @@ function Networker(socket, handler) {
 
 Networker.prototype.init = function () {
   this.socket.on('data', (data) => {
+    debug(data.length);
     this._bufferedBytes += data.length;
     this.queue.push(data);
 
@@ -100,6 +101,7 @@ Networker.prototype._getPayloadLength = function () {
 Networker.prototype._getPayload = function () {
   if (this._hasEnough(this._payloadLength)) {
     let received = this._readBytes(this._payloadLength);
+    // debug(`getPayload(): ${received.length}`);
     if (this._isFinal && !this._hasCode) {
       this.socket.emit('served', received);
     } else if (!this._isFinal && this._hasCode) {
@@ -140,13 +142,13 @@ Networker.prototype._onData = function (data) {
   }
 }
 
-const SLICE_IN = Math.pow(2, 20);
+const SLICE_IN = Math.pow(2, 22);
 
 Networker.prototype.sendBuffer = function (buffer, code) {
   let chunk = buffer;
   let packet = { controlByte: 0 };
   let final = true;
-  
+
   if (buffer.length > SLICE_IN) {
     final = false;
     if (!code) {
@@ -154,9 +156,9 @@ Networker.prototype.sendBuffer = function (buffer, code) {
     }
     chunk = buffer.slice(0, SLICE_IN);
     buffer = buffer.slice(SLICE_IN);
-    process.nextTick(() => {
+    setTimeout(() => {
       this.sendBuffer(buffer, code);
-    });
+    }, 1000);
   }
 
   packet.code = code;
@@ -175,8 +177,8 @@ Networker.prototype.sendBuffer = function (buffer, code) {
 }
 
 Networker.prototype._send = function (packet) {
-  debug('Attempting to write...', packet);
-
+  // debug('Attempting to write...', packet.payloadLength);
+  
   let controlByte = Buffer.allocUnsafe(1);
   controlByte[0] = packet.controlByte;
   this.socket.write(controlByte);
@@ -199,7 +201,7 @@ Networker.prototype._send = function (packet) {
   if ((controlByte[0] & 0b100) > 0) {
     this.socket.write(packet.code);
   }
-
+  
   this.socket.write(packet.payload);
 };
 
