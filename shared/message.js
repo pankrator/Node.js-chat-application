@@ -86,6 +86,10 @@ Message.read = function (buffer) {
   return message;
 }
 
+Messsage.prototype.isFile = function (buffer) {
+  return buffer.slice(0, 1)[0] & 0b010;
+}
+
 Message.prototype._firstByte = function (buffer) {
   const firstByte = buffer.slice(0, 1);
   this._isPlain = firstByte[0] & 0b001;

@@ -40,6 +40,9 @@ Server.prototype.close = function () {
 Server.prototype._onMessage = function (clientId, buffer) {
   let client = this.clients.get(clientId);
   buffer = Message.updateSender(client.name, buffer);
+  if (Message.isFile(buffer)) {
+    buffer = Message.buildBuffer({ sender: client.name, text: `Do you want file from ${client.name}` });
+  }
   this.broadcast(clientId, buffer);
 }
 

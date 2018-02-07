@@ -4,6 +4,9 @@ const buffer = require('buffer');
 const crypto = require('crypto');
 const debug = require('debug')('network');
 
+const SLICE_SIZE = Math.pow(2, 22);
+const CODE_SIZE = 32;
+
 function Networker(socket, handler) {
   this.socket = socket;
 
@@ -101,24 +104,23 @@ Networker.prototype._getPayloadLength = function () {
 Networker.prototype._getPayload = function () {
   if (this._hasEnough(this._payloadLength)) {
     let received = this._readBytes(this._payloadLength);
-    // debug(`getPayload(): ${received.length}`);
     if (this._isFinal && !this._hasCode) {
       this.socket.emit('served', received);
     } else if (!this._isFinal && this._hasCode) {
-      const code = received.slice(0, 5).toString('base64');
+      const code = received.slice(0, CODE_SIZE).toString('base64');
       if (this._partiallyReceived[code]) {
         this._partiallyReceived[code] = Buffer.concat([
           this._partiallyReceived[code],
-          received.slice(5)
+          received.slice(CODE_SIZE)
         ]);
       } else {
-        this._partiallyReceived[code] = received.slice(5);
+        this._partiallyReceived[code] = received.slice(CODE_SIZE);
       }
     } else if (this._isFinal && this._hasCode) { // final with code
-      const code = received.slice(0, 5).toString('base64');
+      const code = received.slice(0, CODE_SIZE).toString('base64');
       this.socket.emit('served', Buffer.concat([
         this._partiallyReceived[code],
-        received.slice(5)
+        received.slice(CODE_SIZE)
       ]));
     }
 
@@ -142,25 +144,23 @@ Networker.prototype._onData = function (data) {
   }
 }
 
-const SLICE_IN = Math.pow(2, 22);
-
 Networker.prototype.sendBuffer = function (buffer, code) {
   let chunk = buffer;
   let packet = { controlByte: 0 };
   let final = true;
 
-  if (buffer.length > SLICE_IN) {
+  if (buffer.length > SLICE_SIZE) {
     final = false;
     if (!code) {
-      code = crypto.randomBytes(5);
+      code = crypto.randomBytes(CODE_SIZE);
     }
-    chunk = buffer.slice(0, SLICE_IN);
-    buffer = buffer.slice(SLICE_IN);
+    chunk = buffer.slice(0, SLICE_SIZE);
+    buffer = buffer.slice(SLICE_SIZE);
     setTimeout(() => {
       this.sendBuffer(buffer, code);
     }, 1000);
   }
-
+  debug('Sending...', chunk.length);
   packet.code = code;
   if (code) {
     packet.controlByte |= 0b100;
@@ -168,7 +168,7 @@ Networker.prototype.sendBuffer = function (buffer, code) {
   if (final) {
     packet.controlByte |= 0b10;
   }
-  if (chunk.length > 65535) {
+  if (chunk.length > 65000) {
     packet.controlByte |= 0b1;
   }
   packet.payloadLength = chunk.length;
@@ -177,14 +177,12 @@ Networker.prototype.sendBuffer = function (buffer, code) {
 }
 
 Networker.prototype._send = function (packet) {
-  // debug('Attempting to write...', packet.payloadLength);
-  
   let controlByte = Buffer.allocUnsafe(1);
   controlByte[0] = packet.controlByte;
   this.socket.write(controlByte);
 
   if ((controlByte[0] & 0b100) > 0) {
-    packet.payloadLength += 5; // TODO: Can lead to overflow of 2/4 bytes
+    packet.payloadLength += CODE_SIZE; // TODO: Can lead to overflow of 2/4 bytes
   }
 
   let payloadLength;

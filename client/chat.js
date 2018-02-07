@@ -20,6 +20,7 @@ const getHost = async input => new Promise(resolve =>
 
 const onMessage = message => {
   if (message._isFile) {
+    readline.cursorTo(process.stdout, 0, 0);
     input.question(`${message._sender} sent you a file ${message._fileName}. Do you want it (y/n)`, answer => {
       if (answer === 'y') {
         const savePath = path.join(__dirname, 'received', message._fileName);
