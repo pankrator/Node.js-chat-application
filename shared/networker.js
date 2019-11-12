@@ -4,14 +4,13 @@ const buffer = require('buffer');
 const crypto = require('crypto');
 const debug = require('debug')('network');
 
-const SLICE_SIZE = Math.pow(2, 22);
+const SLICE_SIZE = Math.pow(2, 15);
 const CODE_SIZE = 32;
 
 function Networker(socket, handler) {
   this.socket = socket;
 
   this._isFinal = false;
-  this._hasCode = false;
   this._isLongPayload = false;
   this._process = false;
   this._state = 'CONTROL_BYTE';
@@ -86,7 +85,6 @@ Networker.prototype._getControlByte = function () {
     let byte = this._readBytes(1);
     this._isLongPayload = byte[0] & 0b1; // Get first bit of the byte
     this._isFinal = byte[0] & 0b10;
-    this._hasCode = byte[0] & 0b100;
     this._state = 'PAYLOAD_LENGTH';
   }
 }
@@ -104,24 +102,8 @@ Networker.prototype._getPayloadLength = function () {
 Networker.prototype._getPayload = function () {
   if (this._hasEnough(this._payloadLength)) {
     let received = this._readBytes(this._payloadLength);
-    if (this._isFinal && !this._hasCode) {
+    if (this._isFinal) {
       this.socket.emit('served', received);
-    } else if (!this._isFinal && this._hasCode) {
-      const code = received.slice(0, CODE_SIZE).toString('base64');
-      if (this._partiallyReceived[code]) {
-        this._partiallyReceived[code] = Buffer.concat([
-          this._partiallyReceived[code],
-          received.slice(CODE_SIZE)
-        ]);
-      } else {
-        this._partiallyReceived[code] = received.slice(CODE_SIZE);
-      }
-    } else if (this._isFinal && this._hasCode) { // final with code
-      const code = received.slice(0, CODE_SIZE).toString('base64');
-      this.socket.emit('served', Buffer.concat([
-        this._partiallyReceived[code],
-        received.slice(CODE_SIZE)
-      ]));
     }
 
     this._state = 'CONTROL_BYTE';
@@ -144,27 +126,50 @@ Networker.prototype._onData = function (data) {
   }
 }
 
-Networker.prototype.sendBuffer = function (buffer, code) {
+Networker.prototype.sendStream = function (stream) {
+  // const processChunk = () => {
+  //   let chunk;
+  //   while ((chunk = stream.read()) !== null) {
+  //     let packet = { controlByte: 0 };
+  //     packet.controlByte |= 0b10;
+  //     if (chunk.length > 65000) {
+  //       packet.controlByte |= 0b1;
+  //     }
+  //     packet.payloadLength = chunk.length;
+  //     packet.payload = chunk;
+  //     this._send(packet);
+  //   }
+  //   stream.once('readable', processChunk);
+  // }
+  // stream.once('readable', processChunk);
+
+  stream.on('data', chunk => {
+    // console.log('Sending...', chunk.length);
+    let packet = { controlByte: 0 };
+    packet.controlByte |= 0b10;
+    if (chunk.length > 65000) {
+      packet.controlByte |= 0b1;
+    }
+    packet.payloadLength = chunk.length;
+    packet.payload = chunk;
+    this._send(packet);
+  });
+}
+
+Networker.prototype.sendBuffer = function (buffer) {
   let chunk = buffer;
   let packet = { controlByte: 0 };
   let final = true;
 
   if (buffer.length > SLICE_SIZE) {
     final = false;
-    if (!code) {
-      code = crypto.randomBytes(CODE_SIZE);
-    }
     chunk = buffer.slice(0, SLICE_SIZE);
     buffer = buffer.slice(SLICE_SIZE);
     setTimeout(() => {
-      this.sendBuffer(buffer, code);
-    }, 1000);
+      this.sendBuffer(buffer);
+    }, 1);
   }
   debug('Sending...', chunk.length);
-  packet.code = code;
-  if (code) {
-    packet.controlByte |= 0b100;
-  }
   if (final) {
     packet.controlByte |= 0b10;
   }
@@ -181,10 +186,6 @@ Networker.prototype._send = function (packet) {
   controlByte[0] = packet.controlByte;
   this.socket.write(controlByte);
 
-  if ((controlByte[0] & 0b100) > 0) {
-    packet.payloadLength += CODE_SIZE; // TODO: Can lead to overflow of 2/4 bytes
-  }
-
   let payloadLength;
   if (controlByte[0] & 0b1 === 1) {
     payloadLength = Buffer.allocUnsafe(4);
@@ -195,11 +196,6 @@ Networker.prototype._send = function (packet) {
   }
   this.socket.write(payloadLength);
 
-  // TODO: FIX FIX FIX THAAAAAT
-  if ((controlByte[0] & 0b100) > 0) {
-    this.socket.write(packet.code);
-  }
-  
   this.socket.write(packet.payload);
 };
 

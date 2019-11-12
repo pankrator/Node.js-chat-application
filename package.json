@@ -4,6 +4,10 @@
   "description": "",
   "main": "server.js",
   "scripts": {
+    "client": "node client/chat.js",
+    "debug_client": "node --inspect client/chat.js",
+    "debug_server": "node --inspect server/run.js",
+    "start": "node server/run.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

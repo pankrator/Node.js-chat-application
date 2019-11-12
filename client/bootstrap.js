@@ -5,7 +5,7 @@ const net = require('net');
 module.exports = {
   connect: (host, port) => {
     let socket = net.createConnection({ host, port });
-    
+
     return new Promise((resolve, reject) => {
       socket.on('connect', () => {
         resolve(socket);

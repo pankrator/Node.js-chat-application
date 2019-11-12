@@ -6,6 +6,8 @@ const path = require('path');
 const Client = require('./client');
 const commander = require('./commander');
 
+const DOWNLOAD_FOLDER = "downloads";
+
 const input = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
@@ -18,26 +20,32 @@ const getHost = async input => new Promise(resolve =>
   })
 );
 
-const onMessage = message => {
-  if (message._isFile) {
-    readline.cursorTo(process.stdout, 0, 0);
-    input.question(`${message._sender} sent you a file ${message._fileName}. Do you want it (y/n)`, answer => {
-      if (answer === 'y') {
-        const savePath = path.join(__dirname, 'received', message._fileName);
-        fs.writeFileSync(savePath, message._fileBuffer);
+const onMessage = (sender, message) => {
+  console.log(sender, '-->', message);
+}
+
+const fileHandler = (fileSender, fileName, fileContent, final) => {
+  let filePath = path.join(process.cwd(), DOWNLOAD_FOLDER, fileSender+"_"+fileName);
+  if (fileContent.length > 0) {
+    // console.log(">>>>>>received file data<<<<<<", fileContent.length);
+    fs.appendFile(filePath, fileContent, err => {
+      if (err) {
+        throw err;
+      }
+      if (final) {
+        console.log("Received file:", fileName);
       }
     });
-  } else {
-    console.log(message._sender, '-->', message._text);
   }
 }
 
 async function run() {
   const host = await getHost(input);
-  
+
   let client = new Client(input);
-  client.start({ host, port: 9000 });
   client.onMessage(onMessage);
+  client.onFile(fileHandler);
+  client.start({ host, port: 9000 });
 
   input.prompt();
   input.on('line', line => {

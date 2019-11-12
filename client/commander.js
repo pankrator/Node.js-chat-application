@@ -15,6 +15,6 @@ module.exports = command => {
   } else {
     result.line = command;
   }
-  
+
   return result;
 }

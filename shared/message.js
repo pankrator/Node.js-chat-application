@@ -1,98 +1,137 @@
 'use strict';
 
+const TEXT_MESSAGE_MASK = 0b01;
+const FILE_BEGIN_MASK = 0b110;
+const FILE_MASK = 0b10;
+const FILE_END_MASK = 0b1010;
+
 function Message() {
   this._isFile = 0;
   this._isPlain = 0;
-  this._hasSender = 0;
+
+  this._offset = 0;
 
   this._sender = null;
   this._fileName = null;
   this._fileBuffer = null;
   this._text = null;
 };
+
 module.exports = Message;
 
-Message.buildBuffer = function ({ sender, text, fileName, fileBuffer }) {
-  let buffer = Buffer.alloc(1);
-
-  if (sender) {
-    buffer[0] |= 0b100;
-    const senderLength = Buffer.byteLength(sender);
-    let senderBuffer = Buffer.allocUnsafe(1 + senderLength);
-    senderBuffer.writeUInt8(senderLength);
-    senderBuffer.write(sender, 1);
-    buffer = Buffer.concat([buffer, senderBuffer]);
+Message.buildText = function ({ sender, text }) {
+  if (!sender) {
+    throw new Error('sender is missing');
+  }
+  if (!text) {
+    throw new Error('text is missing');
   }
 
-  if (text) {
-    buffer[0] |= 0b001;
-    buffer = Buffer.concat([buffer, Buffer.from(text)]);
-  } else if (fileBuffer) {
-    buffer[0] |= 0b010;
-    const nameLength = Buffer.byteLength(fileName);
-    let nameBuffer = Buffer.allocUnsafe(1 + nameLength);
-    nameBuffer.writeUInt8(nameLength);
-    nameBuffer.write(fileName, 1);
-    buffer = Buffer.concat([buffer, nameBuffer, fileBuffer]);
-  }
+  const senderLength = Buffer.byteLength(sender);
+  const textLength = Buffer.byteLength(text);
+  let buffer = Buffer.alloc(1+1+senderLength+2+textLength);
+  buffer[0] |= TEXT_MESSAGE_MASK;
+  let offset = 1;
+  buffer.writeUInt8(senderLength,offset);
+  offset++;
+  buffer.write(sender, offset, "utf8");
+  offset+=senderLength;
+  buffer.writeUInt16BE(textLength, offset);
+  offset+=2;
+  buffer.write(text, offset);
 
   return buffer;
 }
 
-Message.updateSender = function (sender, buffer) {
-  const senderLength = Buffer.byteLength(sender);
-  const hasSender = buffer[0] & 0b100;
-  let remainingBuffer;
-  if (hasSender) {
-    remainingBuffer = buffer.slice(2 + buffer.readUInt8(1, true));
+Message.buildFile = function ({ sender, fileName, fileContent, fileBegin, fileEnd }) {
+  let buffer;
+  const fileContentLength = Buffer.byteLength(fileContent);
+  let offset = 1;
+  if (fileBegin) {
+    const senderLength = Buffer.byteLength(sender);
+    const fileNameLength = Buffer.byteLength(fileName);
+    buffer = Buffer.alloc(1+1+senderLength+1+fileNameLength+2+fileContentLength);
+    buffer[0] |= FILE_BEGIN_MASK;
+    buffer.writeUInt8(senderLength,offset);
+    offset++;
+    buffer.write(sender, offset, "utf8");
+    offset+=senderLength;
+    buffer.writeUInt8(fileNameLength,offset);
+    offset++;
+    buffer.write(fileName, offset, "utf8");
+    offset+=fileNameLength;
   } else {
-    remainingBuffer = buffer.slice(1);
+    buffer = Buffer.alloc(1+2+fileContentLength);
+    if (fileEnd) {
+      buffer[0] |= FILE_END_MASK;
+    } else {
+      buffer[0] |= FILE_MASK;
+    }
   }
-  let resultBuffer = Buffer.allocUnsafe(2 + senderLength);
-  
-  resultBuffer[0] = buffer[0];
-  resultBuffer[0] |= 0b100;
-  resultBuffer.writeUInt8(senderLength, 1, true);
-  resultBuffer.write(sender, 2);
-  resultBuffer = Buffer.concat([resultBuffer, remainingBuffer]);
-  
-  return resultBuffer;
+  buffer.writeUInt16BE(fileContentLength, offset);
+  offset += 2;
+  fileContent.copy(buffer, offset, 0);
+
+  return buffer;
 }
 
 Message.read = function (buffer) {
   let message = new Message();
-  message._firstByte(buffer);
-  let offset = 1;
+  message._parseControlByte(buffer);
 
-  if (message._hasSender) {
-    const senderLength = buffer.readUInt8(offset, true);
-    offset += 1;
-    message._sender = buffer.slice(offset, offset + senderLength).toString();
-    offset += senderLength;
-  }
-  
+  message._readSender(buffer);
+
   if (message._isPlain) {
-    message._text = buffer.slice(offset).toString();
+    message._offset += 2;
+    message._text = buffer.toString('utf8', message._offset);
   }
-  
-  if (message._isFile) {
-    const nameLength = buffer.readUInt8(offset, true);
-    offset += 1;
-    message._fileName = buffer.slice(offset, offset + nameLength).toString();
-    offset += nameLength;
-    message._fileBuffer = buffer.slice(offset);
-  }
-  
+
   return message;
 }
 
-Messsage.prototype.isFile = function (buffer) {
-  return buffer.slice(0, 1)[0] & 0b010;
+Message.prototype._readSender = function(buffer) {
+  const senderLength = buffer.readUInt8(this._offset, true);
+  this._offset++;
+  this._sender = buffer.toString('utf8', this._offset, this._offset + senderLength);
+  this._offset += senderLength;
 }
 
-Message.prototype._firstByte = function (buffer) {
-  const firstByte = buffer.slice(0, 1);
-  this._isPlain = firstByte[0] & 0b001;
-  this._isFile = firstByte[0] & 0b010;
-  this._hasSender = firstByte[0] & 0b100;
+Message.readFile = function (buffer) {
+  let message = new Message();
+  message._parseControlByte(buffer);
+
+
+  if (Message.isFileBegin(buffer)) {
+    message._readSender(buffer);
+    const nameLength = buffer.readUInt8(message._offset, true);
+    message._offset += 1;
+    message._fileName = buffer.toString('utf8', message._offset, message._offset + nameLength);
+    message._offset += nameLength;
+  }
+
+  let contentLength = buffer.readUInt16BE(message._offset);
+  message._offset+=2;
+  message._fileBuffer = buffer.slice(message._offset, message._offset + contentLength);
+
+  return message;
+}
+
+Message.isFileBegin = function (buffer) {
+  return buffer.slice(0, 1)[0] == FILE_BEGIN_MASK;
+}
+
+Message.isFileEnd = function (buffer) {
+  return buffer.slice(0, 1)[0] == FILE_END_MASK;
+}
+
+Message.isFile = function (buffer) {
+  let controlByte = buffer.slice(0, 1)[0];
+  return controlByte == FILE_MASK || controlByte == FILE_BEGIN_MASK || controlByte == FILE_END_MASK;
+}
+
+Message.prototype._parseControlByte = function (buffer) {
+  const controlByte = buffer.slice(0, 1);
+  this._isPlain = controlByte[0] & 0b001;
+  this._isFile = controlByte[0] & 0b010;
+  this._offset++;
 }

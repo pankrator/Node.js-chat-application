@@ -38,11 +38,7 @@ Server.prototype.close = function () {
 }
 
 Server.prototype._onMessage = function (clientId, buffer) {
-  let client = this.clients.get(clientId);
-  buffer = Message.updateSender(client.name, buffer);
-  if (Message.isFile(buffer)) {
-    buffer = Message.buildBuffer({ sender: client.name, text: `Do you want file from ${client.name}` });
-  }
+  console.log("Received buffer with length: ", buffer.length);
   this.broadcast(clientId, buffer);
 }
 
@@ -77,7 +73,7 @@ Server.prototype._onConnection = function (socket) {
 }
 
 Server.prototype.sendToAll = function (message) {
-  message = Message.buildBuffer({ text: message });
+  message = Message.buildText({ sender: "server", text: message });
   for (let [id, client] of this.clients) {
     client.networker.sendBuffer(message);
   }
